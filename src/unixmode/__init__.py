@@ -1,33 +1,15 @@
-from dataclasses import dataclass, field
+from __future__ import annotations
+
+from dataclasses import dataclass
 import enum
-from enum import StrEnum, IntFlag, NAMED_FLAGS
+from enum import StrEnum, NAMED_FLAGS
 from typing import ClassVar, Self, TypedDict
 
 from .classproperty import classproperty
-
-class _PermissionSlot(StrEnum):
-    """ Helper class for formatting symbolic permissions. """
-    USER = "user"
-    GROUP = "group"
-    OTHER = "other"
-
-class OctalFlag(IntFlag):
-    BASE = enum.nonmember(8)
-    FLAGS_PER_DIGIT = enum.nonmember(int.bit_length(7))
-
-    @classmethod
-    def __init_subclass__(cls):
-        unique_members = set(member.value for member in iter(cls))
-        if len(unique_members) > cls.FLAGS_PER_DIGIT:
-            raise TypeError(
-                f"OctalFlag class {cls.__qualname__} cannot have more than 3 unique values",
-            )
-        if max(unique_members) > cls.BASE - 1:
-            raise TypeError(
-                f"OctalFlag class {cls.__qualname__} cannot have a value higher than 8",
-            )
+from .octalflag import OctalFlag
 
 @enum.verify(NAMED_FLAGS)
+# pylint what are you cooking. OctalFlag defines no enum members.
 class SetId(OctalFlag): # pylint: disable=invalid-enum-extension
     NONE = 0
     STICKY = 1
@@ -44,18 +26,19 @@ class SetId(OctalFlag): # pylint: disable=invalid-enum-extension
         else:
             return "s" if execute else "S"
 
-    def _mask_slot(self, slot: _PermissionSlot | str) -> Self:
-        Slot = _PermissionSlot
-        slot = Slot(slot)
+    def _mask_slot(self, slot: ModeSlot | str) -> Self:
+        slot = ModeSlot(slot)
 
-        if slot == Slot.USER:
+        if slot == ModeSlot.USER:
             return self & self.USER
-        elif slot == Slot.GROUP:
+        elif slot == ModeSlot.GROUP:
             return self & self.GROUP
-        elif slot == Slot.OTHER:
+        elif slot == ModeSlot.OTHER:
             return self & self.STICKY
 
+
 @enum.verify(NAMED_FLAGS)
+# pylint what are you cooking. OctalFlag defines no enum members.
 class Permission(OctalFlag): # pylint: disable=invalid-enum-extension
     NONE = 0
     EXECUTE = 1
@@ -75,23 +58,98 @@ class Permission(OctalFlag): # pylint: disable=invalid-enum-extension
 
         return "".join(slots)
 
-class _SymbolicKwargs(TypedDict):
-    extra: SetId
-    user: Permission
-    group: Permission
-    other: Permission
-
 @dataclass
 class PureMode:
-    raw: int = field(repr=False)
-    extra: SetId
-    user: Permission
-    group: Permission
-    other: Permission
+    """ The main attraction. Analogous to pathlib.Path. """
+    extra: SetId = SetId.NONE
+    user: Permission = Permission.NONE
+    group: Permission = Permission.NONE
+    other: Permission = Permission.NONE
 
     S_ISUID: ClassVar = SetId.USER
     S_ISGID: ClassVar = SetId.GROUP
     S_ISVTX: ClassVar = SetId.STICKY
+
+    #
+    # Main public API
+    #
+
+    @classmethod
+    def new(
+        cls,
+        extra: SetId = SetId.NONE,
+        user: Permission = Permission.NONE,
+        group: Permission = Permission.NONE,
+        other: Permission = Permission.NONE,
+    ):
+        symbolic_kwargs = _SymbolicKwargs(extra=extra, user=user, group=group, other=other)
+        #integral_arg = cls._to_raw(**symbolic_kwargs)
+
+        return cls(**symbolic_kwargs)
+        #return cls(raw=integral_arg, **symbolic_kwargs)
+
+    @classmethod
+    def from_raw(cls, value: int) -> Self:
+        symbolic_kwargs = cls._from_raw(value)
+        return cls(**symbolic_kwargs)
+        #return cls(raw=value, **symbolic_kwargs)
+
+    def to_raw(self) -> int:
+        return self._to_raw(extra=self.extra, user=self.user, group=self.group, other=self.other)
+
+    def add(
+        self,
+        extra: SetId = SetId.NONE,
+        user: Permission = Permission.NONE,
+        group: Permission = Permission.NONE,
+        other: Permission = Permission.NONE,
+    ) -> Self:
+        """ This *both* mutates self *and* returns self. """
+        self.extra |= extra
+        self.user |= user
+        self.group |= group
+        self.other |= other
+
+        return self
+
+    def to_symbolic(self) -> str:
+        """
+        Returns the mode in the symbolic representation chmod(1) and ls(1) use.
+        """
+
+        user = self.user._to_symbolic(self.extra._mask_slot("user"))
+        group = self.group._to_symbolic(self.extra._mask_slot("group"))
+        other = self.other._to_symbolic(self.extra._mask_slot("other"))
+
+        return "".join([user, group, other])
+
+    @property
+    def raw(self) -> int:
+        return self._raw
+        #return self._to_raw(**dataclasses.asdict(self))
+
+    @raw.setter
+    def raw(self, value: int):
+        symbolic_kwargs = self._from_raw(value)
+        self.extra = symbolic_kwargs['extra']
+        self.user = symbolic_kwargs['user']
+        self.group = symbolic_kwargs['group']
+        self.other = symbolic_kwargs['other']
+        self._raw = value
+
+    #
+    # Data model and other dunders.
+    #
+
+    def __post_init__(self):
+        self._raw = self._to_raw(self.extra, self.user, self.group, self.other)
+
+    def __or__(self, other: Self) -> Self:
+        return self.from_raw(self.raw | other.raw)
+
+    #
+    # Implementation details
+    #
 
     @classmethod
     def _from_raw(cls, value: int) -> _SymbolicKwargs:
@@ -113,11 +171,6 @@ class PureMode:
             group=Permission(digits.pop()),
             other=Permission(digits.pop()),
         )
-
-    @classmethod
-    def from_raw(cls, value: int) -> Self:
-        symbolic_kwargs = cls._from_raw(value)
-        return cls(raw=value, **symbolic_kwargs)
 
     @classmethod
     def _to_raw(
@@ -144,47 +197,7 @@ class PureMode:
 
         return value
 
-    def to_raw(self) -> int:
-        return self._to_raw(extra=self.extra, user=self.user, group=self.group, other=self.other)
-
-    @classmethod
-    def new(
-        cls,
-        extra: SetId = SetId.NONE,
-        user: Permission = Permission.NONE,
-        group: Permission = Permission.NONE,
-        other: Permission = Permission.NONE,
-    ):
-        symbolic_kwargs = _SymbolicKwargs(extra=extra, user=user, group=group, other=other)
-        integral_arg = cls._to_raw(**symbolic_kwargs)
-        return cls(raw=integral_arg, **symbolic_kwargs)
-
-    def add(
-        self,
-        extra: SetId = SetId.NONE,
-        user: Permission = Permission.NONE,
-        group: Permission = Permission.NONE,
-        other: Permission = Permission.NONE,
-    ) -> Self:
-        """ This *both* mutates self *and* returns self. """
-        self.extra |= extra
-        self.user |= user
-        self.group |= group
-        self.other |= other
-
-        return self
-
-    def to_symbolic(self) -> str:
-        """
-        Returns the mode in the symbolic representation chmod(1) and ls(1) use.
-        """
-        Slot = _PermissionSlot
-
-        user = self.user._to_symbolic(self.extra._mask_slot("user"))
-        group = self.group._to_symbolic(self.extra._mask_slot("group"))
-        other = self.other._to_symbolic(self.extra._mask_slot("other"))
-
-        return "".join([user, group, other])
+    # Constants!
 
     @classproperty
     def SYSTEM_DIR(cls) -> Self:
@@ -237,7 +250,17 @@ class PureMode:
         """ Mode common for sensitive but modifiable files like SSH private keys. """
         return cls.from_raw(0o600)
 
-    def __or__(self, other: Self) -> Self:
-        return self.from_raw(self.raw | other.raw)
+# Fun fact, did you know that names starting with an underscore aren't in __all__ by default?
+class _SymbolicKwargs(TypedDict):
+    extra: SetId
+    user: Permission
+    group: Permission
+    other: Permission
+
+class ModeSlot(StrEnum):
+    """ Helper class for formatting symbolic permissions. """
+    USER = "user"
+    GROUP = "group"
+    OTHER = "other"
 
 #S_IRWXU = PureMode()

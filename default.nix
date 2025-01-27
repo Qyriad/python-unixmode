@@ -17,7 +17,9 @@ in base.overrideAttrs (prev: {
 		byPythonVersion = let
 			pyInterpreters = lib.attrValues pkgs.pythonInterpreters;
 			listOfAttrs = foldToList pyInterpreters (acc: python: let
-				attr = python.pythonAttr or null;
+				attr = let
+					res = builtins.tryEval (python.pythonAttr or null);
+				in if res.success then res.value else null;
 				isPy3 = python.isPy3 or false;
 				scope = pipeNullable attr [
 					(append "Packages")

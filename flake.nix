@@ -12,19 +12,19 @@
 		pkgs = import nixpkgs { inherit system; };
 		inherit (pkgs) lib;
 
-		python-richmode = import ./default.nix { inherit pkgs; };
+		python-unixmode = import ./default.nix { inherit pkgs; };
 
-		# default.nix exposes python-richmode evaluated for multiple `pythonXPackages` sets,
-		# so let's ranslate that to additional flake output attributes.
+		# default.nix exposes python-unixmode evaluated for multiple `pythonXPackages` sets,
+		# so let's translate that to additional flake output attributes.
 		extraVersions = lib.mapAttrs' (pyName: value: {
-			name = "${pyName}-richmode";
+			name = "${pyName}-unixmode";
 			inherit value;
-		}) python-richmode.byPythonVersion;
+		}) python-unixmode.byPythonVersion;
 
 		packages = extraVersions // {
-			default = python-richmode;
-			inherit python-richmode;
-			python3-richmode = python-richmode;
+			default = python-unixmode;
+			inherit python-unixmode;
+			python3-unixmode = python-unixmode;
 		};
 
 		devShells = lib.mapAttrs (name: value: pkgs.callPackage value.mkDevShell { }) packages;

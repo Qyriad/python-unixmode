@@ -4,8 +4,8 @@
 	stdenvNoCC,
 	python,
 	setuptools,
-	pytestCheckHook,
 	wheel,
+	pytestCheckHook,
 	pypaBuildHook,
 	pypaInstallHook,
 	pythonCatchConflictsHook,
@@ -21,7 +21,7 @@
 	# FIXME: should this be python.stdenv?
 	inherit (stdenv) hostPlatform buildPlatform;
 in stdenv.mkDerivation (self: {
-	pname = "${python.name}-richmode";
+	pname = "${python.name}-unixmode";
 	version = "0.0.1";
 
 	strictDeps = true;
@@ -30,12 +30,12 @@ in stdenv.mkDerivation (self: {
 	doCheck = true;
 	doInstallCheck = true;
 
-
 	src = lib.fileset.toSource {
 		root = ./.;
 		fileset = lib.fileset.unions [
-			./src
 			./pyproject.toml
+			./src
+			./tests
 		];
 	};
 
@@ -56,13 +56,9 @@ in stdenv.mkDerivation (self: {
 		pythonNamespacesHook
 	];
 
-	nativeCheckInputs = [
-		pythonImportsCheckHook
-	];
-
 	nativeInstallCheckInputs = [
 		pythonImportsCheckHook
-		#pytestCheckHook
+		pytestCheckHook
 	];
 
 	postFixup = ''
@@ -74,13 +70,11 @@ in stdenv.mkDerivation (self: {
 	passthru = {
 		mkDevShell = {
 			mkShellNoCC,
-			pyright,
 			pylint,
 			uv,
 		}: mkShellNoCC {
 			inputsFrom = [ self.finalPackage ];
 			packages = [
-				pyright
 				pylint
 				uv
 			];
@@ -88,6 +82,7 @@ in stdenv.mkDerivation (self: {
 	};
 
 	meta = {
+		maintainers = with lib.maintainers; [ qyriad ];
 		isBuildPythonPackage = python.meta.platforms;
 	};
 })
